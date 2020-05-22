@@ -27,14 +27,10 @@ Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::st
 }
 
 void Scope::adj_n_buffers_change() {
-  vbo_mutex.lock();
-  std::cout << "changing n_buffers to: " << n_buffers_adj->get_value() << std::endl;
   n_buffers = n_buffers_adj->get_value();
   make_current();
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
   glBufferData(GL_ARRAY_BUFFER, buffer_size * n_buffers * sizeof(Vertex), nullptr, GL_STREAM_DRAW);
-  std::cout << "finished changing n_buffers" << std::endl;
-  vbo_mutex.unlock();
 }
 
 void Scope::realize() {
@@ -221,8 +217,6 @@ void Scope::gl_init_shaders()
 
 bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
 {
-  vbo_mutex.lock();
-  std::cout << "render" << std::endl;
   if (buffers.size() >= n_buffers) {
     std::vector<Vertex> vertices;
     vertices.reserve(buffer_size * n_buffers * sizeof(float));
@@ -245,7 +239,5 @@ bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
     glLineWidth(line_width);
     glDrawArrays(GL_LINE_STRIP, 0, vertices.size() - 1);
   }
-  std::cout << "render finish" << std::endl;
-  vbo_mutex.unlock();
   return true;
 }

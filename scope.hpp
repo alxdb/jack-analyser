@@ -28,7 +28,6 @@ private:
   struct Vertex {
     float pos[2];
   };
-  std::mutex vbo_mutex;
   unsigned int vbo;
   unsigned int vao;
   unsigned int program;
