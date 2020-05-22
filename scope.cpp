@@ -6,59 +6,36 @@
 #include "resources.h"
 #include "GL/glew.h"
 
-void opengl_debug_callback(
-  GLenum source,
-  GLenum type,
-  GLuint id,
-  GLenum severity,
-  GLsizei length,
-  const GLchar* message,
-  const void* userParam)
+Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder) : Gtk::GLArea(cobj), builder(builder)
 {
-  if (severity == GL_DEBUG_SEVERITY_HIGH) {
-    throw std::runtime_error(message);
-  }
-}
+  signal_realize().connect(sigc::mem_fun(this, &Scope::gl_area_realize));
+  signal_unrealize().connect(sigc::mem_fun(this, &Scope::gl_area_unrealize));
+  signal_create_context().connect(sigc::mem_fun(this, &Scope::gl_area_create_context));
+  signal_render().connect(sigc::mem_fun(this, &Scope::render));
 
-int Scope::jack_process_callback(jack_nframes_t n_frames, void* data)
-{
-  Scope* scope = (Scope*) data;
+  line_width_adj = Glib::RefPtr<Gtk::Adjustment>::cast_dynamic(builder->get_object("line_width"));
+  line_width_adj->signal_value_changed().connect(sigc::mem_fun(this, &Scope::adj_line_width_change));
+  adj_line_width_change();
 
-  if (scope->buffers.size() < scope->n_buffers) {
-    float* raw_ptr = (float*) jack_port_get_buffer(scope->in_port, n_frames);
+  n_buffers_adj = Glib::RefPtr<Gtk::Adjustment>::cast_dynamic(builder->get_object("n_buffers"));
+  n_buffers_adj->signal_value_changed().connect(sigc::mem_fun(this, &Scope::adj_n_buffers_change));
+  n_buffers = n_buffers_adj->get_value();
 
-    std::vector<float> buffer(raw_ptr, raw_ptr + n_frames);
-
-    scope->buffers.push_front(buffer);
-  }
-
-  if (scope->buffers.size() == scope->n_buffers) {
-    scope->gl_area->queue_render();
-  }
-
-  return 0;
-}
-
-int Scope::jack_buffer_size_callback(jack_nframes_t n_frames, void* data)
-{
-  Scope* scope = (Scope*) data;
-  scope->buffer_size = n_frames;
-  return 0;
-}
-
-Scope::Scope(std::string connected_port_name, Gtk::GLArea* gl_area) :
-  connected_port_name(connected_port_name),
-  gl_area(gl_area)
-{
-  gl_area->signal_realize().connect(sigc::mem_fun(this, &Scope::init_gl));
-  gl_area->signal_unrealize().connect(sigc::mem_fun(this, &Scope::deinit_gl));
-  gl_area->signal_render().connect(sigc::mem_fun(this, &Scope::render));
   init_audio();
 }
 
 Scope::~Scope() {
   jack_deactivate(jack_client);
 }
+
+void Scope::adj_n_buffers_change() {
+  n_buffers = n_buffers_adj->get_value();
+  make_current();
+  glBindBuffer(GL_ARRAY_BUFFER, vbo);
+  glBufferData(GL_ARRAY_BUFFER, buffer_size * n_buffers * sizeof(Vertex), nullptr, GL_STREAM_DRAW);
+}
+
+// Audio
 
 void Scope::init_audio()
 {
@@ -80,15 +57,71 @@ void Scope::init_audio()
   buffer_size = jack_get_buffer_size(jack_client);
 
   jack_activate(jack_client);
+}
 
+int Scope::jack_process_callback(jack_nframes_t n_frames, void* data)
+{
+  Scope* scope = (Scope*) data;
+
+  if (scope->buffers.size() < scope->n_buffers) {
+    float* raw_ptr = (float*) jack_port_get_buffer(scope->in_port, n_frames);
+
+    std::vector<float> buffer(raw_ptr, raw_ptr + n_frames);
+
+    scope->buffers.push_front(buffer);
+  }
+
+  if (scope->buffers.size() == scope->n_buffers) {
+    scope->queue_render();
+  }
+
+  return 0;
+}
+
+int Scope::jack_buffer_size_callback(jack_nframes_t n_frames, void* data)
+{
+  Scope* scope = (Scope*) data;
+  scope->buffer_size = n_frames;
+  return 0;
+}
+
+
+void Scope::connect_to_port(std::string port_name)
+{
+  connected_port_name = port_name;
   if (int err = jack_connect(jack_client, connected_port_name.c_str(), jack_port_name(in_port)) != 0) {
     std::cerr << "couldn't connect to " + connected_port_name;
   }
 }
 
-void Scope::init_gl()
+// Video
+
+void opengl_debug_callback(
+  GLenum source,
+  GLenum type,
+  GLuint id,
+  GLenum severity,
+  GLsizei length,
+  const GLchar* message,
+  const void* userParam)
 {
-  gl_area->make_current();
+  if (severity == GL_DEBUG_SEVERITY_HIGH) {
+    throw std::runtime_error(message);
+  }
+}
+
+
+Glib::RefPtr<Gdk::GLContext> Scope::gl_area_create_context() {
+  Glib::RefPtr<Gdk::GLContext> context = get_context();
+  if (GLEW_KHR_debug) {
+    context->set_debug_enabled();
+  }
+  return context;
+}
+
+void Scope::gl_area_realize()
+{
+  make_current();
   if (GLenum err = glewInit() != GLEW_OK) {
     throw std::runtime_error((const char*) glewGetErrorString(err));
   }
@@ -97,10 +130,10 @@ void Scope::init_gl()
     glDebugMessageCallback(opengl_debug_callback, nullptr);
   }
   init_gl_buffers();
-  init_shaders();
+  init_gl_shaders();
 }
 
-void Scope::deinit_gl()
+void Scope::gl_area_unrealize()
 {
   glDeleteProgram(program);
   glDeleteVertexArrays(1, &vao);
@@ -118,7 +151,7 @@ void Scope::init_gl_buffers()
   glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
 }
 
-void Scope::init_shaders()
+void Scope::init_gl_shaders()
 {
   auto compile_shader = [](GLenum shader_type, const char * glsl_file) -> GLuint {
     GLuint shader = glCreateShader(shader_type);
@@ -177,7 +210,7 @@ bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
     vertices.reserve(buffer_size * n_buffers * sizeof(float));
 
     float x = -1.0;
-    float x_inc = 2.0 / (n_buffers * (buffer_size - 1));
+    float x_inc = 2.0 / (n_buffers * (buffer_size - 2));
 
     for (int i = 0; i < n_buffers; i++) {
       std::vector<float> samples = buffers.back();
@@ -191,7 +224,7 @@ bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
     glClearColor(0.1, 0.1, 0.1, 1);
     glClear(GL_COLOR_BUFFER_BIT);
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(Vertex), vertices.data());
-    glLineWidth(5.0);
+    glLineWidth(line_width);
     glDrawArrays(GL_LINE_STRIP, 0, vertices.size() - 1);
   }
   return true;
