@@ -5,18 +5,30 @@
 
 class Scope : public Gtk::GLArea {
 private:
+  void realize();
+  void unrealize();
+  Glib::RefPtr<Gtk::Builder> builder;
+  Glib::RefPtr<Gtk::Adjustment> line_width_adj;
+  void adj_line_width_change() { line_width = line_width_adj->get_value(); };
+  Glib::RefPtr<Gtk::Adjustment> n_buffers_adj;
+  void adj_n_buffers_change();
+  Glib::Dispatcher render_dispatch;
+
+  size_t max_buffers;
+  size_t n_buffers;
+  size_t buffer_size;
+  std::list<std::vector<float>> buffers;
+
+  void gl_init();
+  void gl_uninit();
+  Glib::RefPtr<Gdk::GLContext> gl_create_context();
+  void gl_init_shaders();
+  void gl_init_buffers();
+  bool render(const Glib::RefPtr<Gdk::GLContext>& context);
   struct Vertex {
     float pos[2];
   };
-  std::list<std::vector<float>> buffers;
-  long n_buffers;
-  long buffer_size;
-
-  void gl_area_realize();
-  void gl_area_unrealize();
-  Glib::RefPtr<Gdk::GLContext> gl_area_create_context();
-  void init_gl_shaders();
-  void init_gl_buffers();
+  std::mutex vbo_mutex;
   unsigned int vbo;
   unsigned int vao;
   unsigned int program;
@@ -28,18 +40,9 @@ private:
   jack_client_t* jack_client;
   jack_port_t* in_port;
   std::string connected_port_name;
-
-  Glib::RefPtr<Gtk::Builder> builder;
-  Glib::RefPtr<Gtk::Adjustment> line_width_adj;
-  void adj_line_width_change() { line_width = line_width_adj->get_value(); };
-  Glib::RefPtr<Gtk::Adjustment> n_buffers_adj;
-  void adj_n_buffers_change();
+  void connect_to_port();
 
 public:
-  bool render(const Glib::RefPtr<Gdk::GLContext>& context);
-  void set_n_buffers(long n_buffers) { this->n_buffers = n_buffers; };
-  void connect_to_port(std::string port_name);
-
-  Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder);
-  virtual ~Scope();
+  Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::string port_name);
+  virtual ~Scope() {};
 };

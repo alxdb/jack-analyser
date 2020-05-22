@@ -13,8 +13,7 @@ int main(int argc, char** argv) {
   auto builder = Gtk::Builder::create_from_file(RESOURCES "main.glade");
   builder->get_widget("main_window", window);
 
-  builder->get_widget_derived("scope_draw", scope_draw);
-  scope_draw->connect_to_port( "PulseAudio JACK Sink:front-left");
+  builder->get_widget_derived("scope_draw", scope_draw, "PulseAudio JACK Sink:front-left");
 
   return app->run(*window);
 }
