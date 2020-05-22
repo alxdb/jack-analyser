@@ -1,27 +1,44 @@
+#include "scope.hpp"
+
 #include <fstream>
-#include <sstream>
 #include <iostream>
 
-#include "scope.hpp"
 #include "resources.h"
 #include "GL/glew.h"
 
-Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::string port_name)
+// The scope displays a live signal from jack. one thread reads blocks from jack,
+// and puts them on the back of a list. if the size of the list is equal to 
+// `n_buffers` then futher blocks will be ignored until there is space. If the
+// number of buffers accumulated is greater than or equal to `n_buffers`, and a
+// redraw has not already been requested since the last draw then this thread will
+// request a redraw.
+//
+// Concurrently, the render thread will render a new frame if the number of buffers
+// accumulated is greater than or equal to `n_buffers`. In this case, a new vector for
+// vertices is allocated, the render thread will then pop `n_buffers` buffers from the
+// front of the list, and use its contents to fill the vertex buffer.
+//
+// it is possible that the jack thread writes buffers to the back of the list,
+// while the front of the list is being popped by the render thread.
+//
+// since the jack thread can only add to the back, and the render thread can only pop from the front,
+// this should be threadsafe.
+
+Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::string&& port_name)
   : Gtk::GLArea(cobj), builder(builder), connected_port_name(port_name)
 {
-  signal_realize().connect(sigc::mem_fun(this, &Scope::realize));
-  signal_unrealize().connect(sigc::mem_fun(this, &Scope::unrealize));
+  signal_realize().connect(sigc::mem_fun(this, &Scope::scope_realize));
+  signal_unrealize().connect(sigc::mem_fun(this, &Scope::scope_unrealize));
   signal_create_context().connect(sigc::mem_fun(this, &Scope::gl_create_context));
   signal_render().connect(sigc::mem_fun(this, &Scope::render));
 
   line_width_adj = Glib::RefPtr<Gtk::Adjustment>::cast_dynamic(builder->get_object("line_width"));
   line_width_adj->signal_value_changed().connect(sigc::mem_fun(this, &Scope::adj_line_width_change));
-  line_width = line_width_adj->get_value();
+  line_width = (float) line_width_adj->get_value();
 
   n_buffers_adj = Glib::RefPtr<Gtk::Adjustment>::cast_dynamic(builder->get_object("n_buffers"));
   n_buffers_adj->signal_value_changed().connect(sigc::mem_fun(this, &Scope::adj_n_buffers_change));
   n_buffers = n_buffers_adj->get_value();
-  max_buffers = n_buffers_adj->get_upper();
 
   render_dispatch.connect(sigc::mem_fun(this, &Scope::queue_render));
 }
@@ -33,7 +50,7 @@ void Scope::adj_n_buffers_change() {
   glBufferData(GL_ARRAY_BUFFER, buffer_size * n_buffers * sizeof(Vertex), nullptr, GL_STREAM_DRAW);
 }
 
-void Scope::realize() {
+void Scope::scope_realize() {
   std::cout << "realize" << std::endl;
 
   init_audio();
@@ -41,7 +58,7 @@ void Scope::realize() {
   gl_init();
 }
 
-void Scope::unrealize() {
+void Scope::scope_unrealize() {
   gl_uninit();
   jack_deactivate(jack_client);
 }
@@ -73,17 +90,18 @@ void Scope::init_audio()
 
 int Scope::jack_process_callback(jack_nframes_t n_frames, void* data)
 {
-  Scope* scope = (Scope*) data;
+  auto* scope = (Scope*) data;
 
-  if (scope->buffers.size() <= scope->max_buffers) {
-    float* raw_ptr = (float*) jack_port_get_buffer(scope->in_port, n_frames);
+  if (scope->buffers.size() < scope->n_buffers) {
+    auto* raw_ptr = (float*) jack_port_get_buffer(scope->in_port, n_frames);
 
     std::vector<float> buffer(raw_ptr, raw_ptr + n_frames);
 
     scope->buffers.push_back(buffer);
   }
-  if (scope->buffers.size() >= scope->n_buffers) {
+  if (!scope->render_queued && scope->buffers.size() >= scope->n_buffers) {
     scope->render_dispatch.emit();
+    scope->render_queued = true;
   }
 
   return 0;
@@ -161,7 +179,7 @@ void Scope::gl_init_buffers()
   glGenVertexArrays(1, &vao);
   glBindVertexArray(vao);
   glEnableVertexAttribArray(0);
-  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, 0);
+  glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
 }
 
 void Scope::gl_init_shaders()
@@ -175,7 +193,7 @@ void Scope::gl_init_shaders()
 
     std::string shader_code = shader_code_stream.str();
     const GLchar * cstr = shader_code.c_str();
-    glShaderSource(shader, 1, &cstr, 0);
+    glShaderSource(shader, 1, &cstr, nullptr);
     glCompileShader(shader);
 
     return shader;
@@ -219,12 +237,12 @@ bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
 {
   if (buffers.size() >= n_buffers) {
     std::vector<Vertex> vertices;
-    vertices.reserve(buffer_size * n_buffers * sizeof(float));
+    vertices.reserve(buffer_size * n_buffers);
 
     float x = -1.0;
-    float x_inc = 2.0 / (n_buffers * (buffer_size - 2));
+    float x_inc = 2.0f / (float) (n_buffers * (buffer_size - 2));
 
-    for (int i = 0; i < n_buffers; i++) {
+    for (size_t i = 0; i < n_buffers; i++) {
       std::vector<float> samples = buffers.front();
       for (float sample : samples) {
         vertices.push_back({{x, sample}});
@@ -239,5 +257,6 @@ bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
     glLineWidth(line_width);
     glDrawArrays(GL_LINE_STRIP, 0, vertices.size() - 1);
   }
+  render_queued = false;
   return true;
 }

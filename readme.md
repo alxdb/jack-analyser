@@ -4,5 +4,5 @@ A Program for monitoring jack signals.
 
 ## Operation
 
-The scope displays a live signal from jack. 
-
+`buffers`: each frame will display this many blocks from the audio stream.
+`line width`: the width of the scope line

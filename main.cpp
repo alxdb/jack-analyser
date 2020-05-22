@@ -1,6 +1,4 @@
 #include <gtkmm.h>
-#include <jack/jack.h>
-#include <iostream>
 
 #include "scope.hpp"
 #include "resources.h"
