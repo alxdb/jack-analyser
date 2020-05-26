@@ -2,12 +2,13 @@
 
 #include <fstream>
 #include <iostream>
+#include <future>
 
 #include "resources.h"
 #include "GL/glew.h"
 
 // The scope displays a live signal from jack. one thread reads blocks from jack,
-// and puts them on the back of a list. if the size of the list is equal to 
+// and puts them on the back of a list. if the size of the list is equal to
 // `n_buffers` then futher blocks will be ignored until there is space. If the
 // number of buffers accumulated is greater than or equal to `n_buffers`, and a
 // redraw has not already been requested since the last draw then this thread will
@@ -40,6 +41,10 @@ Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::st
   n_buffers_adj->signal_value_changed().connect(sigc::mem_fun(this, &Scope::adj_n_buffers_change));
   n_buffers = n_buffers_adj->get_value();
 
+  buffers_per_frame_adj = Glib::RefPtr<Gtk::Adjustment>::cast_dynamic(builder->get_object("buffers_per_frame"));
+  buffers_per_frame_adj->signal_value_changed().connect(sigc::mem_fun(this, &Scope::adj_buffers_per_frame));
+  adj_buffers_per_frame();
+
   render_dispatch.connect(sigc::mem_fun(this, &Scope::queue_render));
 }
 
@@ -48,6 +53,16 @@ void Scope::adj_n_buffers_change() {
   make_current();
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
   glBufferData(GL_ARRAY_BUFFER, buffer_size * n_buffers * sizeof(Vertex), nullptr, GL_STREAM_DRAW);
+}
+
+void Scope::adj_buffers_per_frame() {
+  size_t buffers_per_frame_adj_val = buffers_per_frame_adj->get_value();
+  if (buffers_per_frame_adj_val <= n_buffers) {
+    buffers_per_frame = buffers_per_frame_adj->get_value();
+  } else {
+    buffers_per_frame = n_buffers;
+    buffers_per_frame_adj->set_value(n_buffers);
+  }
 }
 
 void Scope::scope_realize() {
@@ -90,14 +105,20 @@ void Scope::init_audio()
 
 int Scope::jack_process_callback(jack_nframes_t n_frames, void* data)
 {
+  static int missed_blocks;
   auto* scope = (Scope*) data;
 
-  if (scope->buffers.size() < scope->n_buffers) {
-    auto* raw_ptr = (float*) jack_port_get_buffer(scope->in_port, n_frames);
+  if (scope->buffers.size() < scope->max_buffers) {
+    missed_blocks = 0;
 
+    auto* raw_ptr = (float*) jack_port_get_buffer(scope->in_port, n_frames);
     std::vector<float> buffer(raw_ptr, raw_ptr + n_frames);
 
     scope->buffers.push_back(buffer);
+  } else {
+    std::async([]() {
+      std::cerr << "missed " << ++missed_blocks << " blocks" << std::endl;
+    });
   }
   if (!scope->render_queued && scope->buffers.size() >= scope->n_buffers) {
     scope->render_dispatch.emit();
@@ -242,12 +263,19 @@ bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
     float x = -1.0;
     float x_inc = 2.0f / (float) (n_buffers * (buffer_size - 2));
 
-    for (size_t i = 0; i < n_buffers; i++) {
-      std::vector<float> samples = buffers.front();
-      for (float sample : samples) {
-        vertices.push_back({{x, sample}});
-        x += x_inc;
+    {
+      int i = 0;
+      for (std::vector<float> samples : buffers) {
+        for (float sample : samples) {
+          vertices.push_back({{x, sample}});
+          x += x_inc;
+        }
+        if (++i == n_buffers) {
+          break;
+        }
       }
+    }
+    for (int i = 0; i < (int) buffers_per_frame; i++) {
       buffers.pop_front();
     }
 

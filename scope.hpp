@@ -12,10 +12,14 @@ private:
   void adj_line_width_change() { line_width = (float) line_width_adj->get_value(); };
   Glib::RefPtr<Gtk::Adjustment> n_buffers_adj;
   void adj_n_buffers_change();
+  Glib::RefPtr<Gtk::Adjustment> buffers_per_frame_adj;
+  void adj_buffers_per_frame();
   Glib::Dispatcher render_dispatch;
 
   size_t n_buffers;
+  size_t max_buffers = 256;
   size_t buffer_size{};
+  size_t buffers_per_frame;
   std::list<std::vector<float>> buffers;
 
   void gl_init();
