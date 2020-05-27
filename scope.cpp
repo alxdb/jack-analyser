@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iostream>
 #include <future>
+#include <chrono>
 
 #include "resources.h"
 #include "GL/glew.h"
@@ -25,7 +26,7 @@
 // since the jack thread can only add to the back, and the render thread can only pop from the front,
 // this should be threadsafe.
 
-Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::string&& port_name)
+Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, const std::string& port_name)
   : Gtk::GLArea(cobj), builder(builder), connected_port_name(port_name)
 {
   signal_realize().connect(sigc::mem_fun(this, &Scope::scope_realize));
@@ -39,6 +40,7 @@ Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::st
 
   n_buffers_adj = Glib::RefPtr<Gtk::Adjustment>::cast_dynamic(builder->get_object("n_buffers"));
   n_buffers_adj->signal_value_changed().connect(sigc::mem_fun(this, &Scope::adj_n_buffers_change));
+  max_buffers = n_buffers_adj->get_upper();
   n_buffers = n_buffers_adj->get_value();
 
   buffers_per_frame_adj = Glib::RefPtr<Gtk::Adjustment>::cast_dynamic(builder->get_object("buffers_per_frame"));
@@ -50,6 +52,10 @@ Scope::Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::st
 
 void Scope::adj_n_buffers_change() {
   n_buffers = n_buffers_adj->get_value();
+  if (buffers_per_frame > n_buffers) {
+    buffers_per_frame = n_buffers;
+    buffers_per_frame_adj->set_value(n_buffers);
+  }
   make_current();
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
   glBufferData(GL_ARRAY_BUFFER, buffer_size * n_buffers * sizeof(Vertex), nullptr, GL_STREAM_DRAW);
@@ -257,6 +263,8 @@ void Scope::gl_init_shaders()
 bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
 {
   if (buffers.size() >= n_buffers) {
+    auto begin = std::chrono::steady_clock::now();
+
     std::vector<Vertex> vertices;
     vertices.reserve(buffer_size * n_buffers);
 
@@ -270,7 +278,7 @@ bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
           vertices.push_back({{x, sample}});
           x += x_inc;
         }
-        if (++i == n_buffers) {
+        if (++i == (int) n_buffers) {
           break;
         }
       }
@@ -284,6 +292,12 @@ bool Scope::render(const Glib::RefPtr<Gdk::GLContext>& context)
     glBufferSubData(GL_ARRAY_BUFFER, 0, vertices.size() * sizeof(Vertex), vertices.data());
     glLineWidth(line_width);
     glDrawArrays(GL_LINE_STRIP, 0, vertices.size() - 1);
+
+    auto render_duration = std::chrono::steady_clock::now() - begin;
+    auto wait_duration = std::chrono::milliseconds(16) - render_duration;
+    if (wait_duration.count() > 0) {
+      std::this_thread::sleep_for(wait_duration);
+    }
   }
   render_queued = false;
   return true;

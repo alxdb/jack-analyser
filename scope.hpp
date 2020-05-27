@@ -17,8 +17,8 @@ private:
   Glib::Dispatcher render_dispatch;
 
   size_t n_buffers;
-  size_t max_buffers = 256;
-  size_t buffer_size{};
+  size_t max_buffers;
+  size_t buffer_size;
   size_t buffers_per_frame;
   std::list<std::vector<float>> buffers;
 
@@ -46,5 +46,5 @@ private:
   void connect_to_port();
 
 public:
-  Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, std::string&& port_name);
+  Scope(GtkGLArea* cobj, const Glib::RefPtr<Gtk::Builder>& builder, const std::string& port_name);
 };
