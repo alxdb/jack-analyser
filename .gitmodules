@@ -1,0 +1,9 @@
+[submodule "include/gl_utils"]
+	path = include/gl_utils
+	url = git@gitlab.com:alxdavbr/gl_utils.git
+[submodule "lib/imgui"]
+	path = lib/imgui
+	url = https://github.com/ocornut/imgui.git
+[submodule "lib/gloo"]
+	path = lib/gloo
+	url = git@gitlab.com:alxdavbr/gloo.git
