@@ -80,12 +80,13 @@ public:
 
   std::vector<float> pop() {
     // std::lock_guard<std::mutex> guard(m_buffer_mutex);
-    if (m_buffers.size() == 0) {
+    if (!m_buffers.empty()) {
+      std::vector<float> buffer = m_buffers.front(); // this fails sometimes with bad_alloc
+      m_buffers.pop_front();
+      return buffer;
+    } else {
       throw std::runtime_error("overrun");
     }
-    std::vector<float> buffer = m_buffers.front(); // this fails sometimes with bad_alloc
-    m_buffers.pop_front();
-    return buffer;
   }
 
   void clear() {

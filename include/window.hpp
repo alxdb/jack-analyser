@@ -59,7 +59,7 @@ public:
   const int& width = m_width;
 
   Window(const std::string& name, int default_width = 1024, int default_height = 768, GLFWmonitor* monitor = nullptr)
-      : name(name) {
+      : name(name), m_width(default_width), m_height(default_height) {
     if (instances == 0) {
       glfwSetErrorCallback(glfw_error_callback);
       glfwInit();

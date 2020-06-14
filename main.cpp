@@ -29,14 +29,16 @@ using namespace gloo;
 class App {
 
   Window m_window;
+  std::string m_default_jack_port;
 
 public:
-  App(const std::string& name) : m_window(name){};
+  App(const std::string& name, const std::string& default_jack_port)
+      : m_window(name), m_default_jack_port(default_jack_port){};
 
   void run() {
     m_window.make_current();
     m_window.init_imgui();
-    AudioBuffer ab("PulseAudio JACK Sink:front-left");
+    AudioBuffer ab(m_default_jack_port);
 
     glfwSwapInterval(1);
     glClearColor(0.0, 0.0, 0.0, 1.0);
@@ -130,7 +132,7 @@ public:
 };
 
 int main() {
-  App app("jack analyser");
+  App app("jack analyser", "PulseAudio JACK Sink:front-left");
   app.run();
   return 0;
 }
