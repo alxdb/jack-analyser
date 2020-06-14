@@ -3,6 +3,7 @@
 #include <iostream>
 #include <list>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -60,8 +61,7 @@ public:
     // std::lock_guard<std::mutex> guard(self->m_buffer_mutex);
     if (self->in_port != 0) {
       float* buffer_ptr = static_cast<float*>(jack_port_get_buffer(self->in_port, nframes));
-      std::vector<float> buffer(buffer_ptr, buffer_ptr + nframes);
-      self->m_buffers.push_back(buffer);
+      self->m_buffers.emplace_back(buffer_ptr, buffer_ptr + nframes);
     }
     return 0;
   }
@@ -78,29 +78,29 @@ public:
     }
   }
 
-  std::vector<float> pop() {
+  std::optional<std::vector<float>> pop() {
     // std::lock_guard<std::mutex> guard(m_buffer_mutex);
     if (!m_buffers.empty()) {
-      std::vector<float> buffer = m_buffers.front(); // this fails sometimes with bad_alloc
+      std::vector<float> buffer = m_buffers.front();
       m_buffers.pop_front();
       return buffer;
     } else {
-      throw std::runtime_error("overrun");
+      return {};
     }
   }
 
   void clear() {
     // std::lock_guard<std::mutex> guard(m_buffer_mutex);
-    while (m_buffers.size() != 0) {
+    while (!m_buffers.empty()) {
       m_buffers.pop_front();
     }
   }
 
 private:
-  int m_sample_rate;
-  int m_buffer_size;
-  jack_client_t* m_jack_client;
-  jack_port_t* in_port;
+  int m_sample_rate{};
+  int m_buffer_size{};
+  jack_client_t* m_jack_client{};
+  jack_port_t* in_port{};
   std::list<std::vector<float>> m_buffers;
   // std::mutex m_buffer_mutex;
 };

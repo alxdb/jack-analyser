@@ -61,8 +61,7 @@ public:
           val = min;
       }
     };
-
-    Param n_buffers = {"n_buffers", 1, 1, 256};
+    Param n_buffers = {"n_buffers", 12, 1, 32};
 
     Program program(Shader(vert_shader, GL_VERTEX_SHADER), Shader(frag_shader, GL_FRAGMENT_SHADER));
     VBO vertex_buffer(GL_ARRAY_BUFFER, (float*)nullptr, (ab.buffer_size * (n_buffers.max + 1)) * 2, GL_STREAM_DRAW);
@@ -74,6 +73,7 @@ public:
 
       ImGui::NewFrame();
 
+      // Controls
       ImGui::SetNextWindowPos({5, 5});
       auto window_flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove;
       if (ImGui::Begin("Controls", NULL, window_flags)) {
@@ -82,6 +82,7 @@ public:
       }
       ImGui::End();
 
+      // Stats
       ImGui::SetNextWindowSize({275, 0});
       ImGui::SetNextWindowPos({(float)(m_window.width - 280), 5});
       window_flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize;
@@ -95,34 +96,31 @@ public:
 
       ImGui::Render();
 
+      float x = -1.0;
+      float dx = 2.0 / (n_buffers.val * ab.buffer_size);
+      std::vector<std::array<float, 2>> coords;
+      for (int i = 0; i <= n_buffers.val; i++) {
+        std::optional<std::vector<float>> buffer = ab.pop();
+        if (buffer) {
+          for (float sample : *buffer) {
+            coords.push_back({x, sample});
+            x += dx;
+          }
+        } else {
+          for (int i = 0; i < ab.buffer_size; i++) {
+            coords.push_back({x, 0.0});
+            x += dx;
+          }
+        }
+      }
+      vertex_buffer.update_data(coords);
+      ab.clear();
+
       glViewport(0, 0, m_window.width, m_window.height);
       glClear(GL_COLOR_BUFFER_BIT);
 
       ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
-      float x = -1.0;
-      float dx = 2.0 / (n_buffers.val * ab.buffer_size);
-      std::vector<std::array<float, 2>> coords;
-      for (int i = 0; i <= n_buffers.val; i++) {
-        try {
-          std::vector<float> buffer = ab.pop();
-          for (float sample : buffer) {
-            coords.push_back({x, sample});
-            x += dx;
-          }
-        } catch (std::runtime_error e) {
-          if (std::string("overrun").compare(e.what()) == 0) {
-            for (int i = 0; i < ab.buffer_size; i++) {
-              coords.push_back({x, 0.0});
-              x += dx;
-            }
-          } else {
-            throw e;
-          }
-        }
-      }
-      // ab.clear();
-      vertex_buffer.update_data(coords);
       glDrawArrays(GL_LINE_STRIP, 0, n_buffers.val * ab.buffer_size + 1);
 
       m_window.swap_buffers();
@@ -131,8 +129,18 @@ public:
   }
 };
 
-int main() {
-  App app("jack analyser", "PulseAudio JACK Sink:front-left");
-  app.run();
+int main(int argc, char** argv) {
+  const char* app_name = "jack analyser";
+  App* app;
+  if (argc == 1) {
+    app = new App(app_name, "PulseAudio JACK Sink:front-left");
+  } else if (argc == 2) {
+    app = new App(app_name, argv[1]);
+  } else {
+    std::cout << "Usage: jack_analyser <port>" << std::endl;
+    return -1;
+  }
+  app->run();
+  delete app;
   return 0;
 }
