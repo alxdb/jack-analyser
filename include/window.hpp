@@ -51,9 +51,6 @@ class Window {
 
 public:
   const std::string name;
-  /* bool should_close() const { return m_should_close; } */
-  /* int width() const { return m_width; } */
-  /* int height() const { return m_height; } */
   const bool& should_close = m_should_close;
   const int& height = m_height;
   const int& width = m_width;
